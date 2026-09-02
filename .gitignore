@@ -1,0 +1,12 @@
+/target
+/verify_work
+/test_run
+/fortran_build
+
+# Quarto book render/cache artifacts (book/ itself, incl. .qmd chapters and
+# tools/, is version-controlled; only generated output is ignored).
+/book/_book/
+/book/.quarto/
+/book/site_libs/
+/book/*_files/
+/book/**/*_files/

@@ -1,0 +1,40 @@
+---
+title: "`ld_i` / `ld_f` / `ld_line`: list-directed input helpers"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself: formats numbers the way Fortran's
+free-form ("list-directed") console output does, and prints the periodic
+progress lines you see scroll by while a large data set is being read,
+sorted, or rescaled — datasets in the paper's own example ran to over 2
+million bryophyte records (Hill 2011, p.196), so this kind of "still
+working..." feedback matters in practice.
+
+### `ld_i`
+
+```{.rust filename="src/lib.rs" tangle="lib__ld_i"}
+pub fn ld_i(v: i64) -> String {
+    format!("{:12}", v)
+}
+```
+
+### `ld_f`
+
+```{.rust filename="src/lib.rs" tangle="lib__ld_f"}
+pub fn ld_f(v: f32) -> String {
+    format!(" {:>12}", format!("{}", v))
+}
+```
+
+### `ld_line`
+
+```{.rust filename="src/lib.rs" tangle="lib__ld_line"}
+pub fn ld_line(body: &str) {
+    cout(&format!(" {}", body));
+}
+```

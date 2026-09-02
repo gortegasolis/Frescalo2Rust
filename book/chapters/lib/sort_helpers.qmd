@@ -1,0 +1,43 @@
+---
+title: "`isort` / `sort2`: index and parallel-array sort helpers"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `isort` sorts a plain array of
+integers, used in `neighsim` to bring together the sites that share a
+given species so their pairwise similarity can be tallied. `sort2` sorts
+two parallel arrays together by the values in the first one — this is how
+[`sampdist`](../sampdist/main.qmd) and `neighsim` rank a site's
+neighbours by distance or similarity while keeping track of which
+neighbour each ranked value belongs to, and how `frescalo`'s
+[`fresca`](../frescalo/core.qmd) ranks species by rescaled frequency.
+
+### `isort`
+
+```{.rust filename="src/lib.rs" tangle="lib__isort"}
+pub fn isort(dict: &mut [i32], n: usize) {
+    dict[1..=n].sort_unstable();
+}
+```
+
+### `sort2`
+
+```{.rust filename="src/lib.rs" tangle="lib__sort2"}
+pub fn sort2(dict: &mut [f32], typ: &mut [i32], n: usize) {
+    let mut pairs: Vec<(f32, i32)> = (1..=n).map(|i| (dict[i], typ[i])).collect();
+    pairs.sort_unstable_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap()
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    for (k, (d, t)) in pairs.into_iter().enumerate() {
+        dict[1 + k] = d;
+        typ[1 + k] = t;
+    }
+}
+```

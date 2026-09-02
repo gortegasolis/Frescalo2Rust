@@ -1,0 +1,56 @@
+project:
+  type: book
+  # Keep all render artifacts inside book/, away from the Cargo project.
+  output-dir: _book
+  pre-render:
+    - python3 tools/tangle.py
+
+book:
+  title: "Frescalo2Rust"
+  subtitle: "Documentation of the Rust port of Mark Hill's FRESCALO"
+  author: "g.ortega.solis@gmail.com"
+  date: today
+  chapters:
+    - index.qmd
+    - part: "src/lib.rs — shared support code"
+      chapters:
+        - chapters/lib/name_helpers.qmd
+        - chapters/lib/rec30.qmd
+        - chapters/lib/data_reader.qmd
+        - chapters/lib/getnum.qmd
+        - chapters/lib/binfnd.qmd
+        - chapters/lib/addwrd.qmd
+        - chapters/lib/sort_wrappers.qmd
+        - chapters/lib/sort_helpers.qmd
+        - chapters/lib/fmt.qmd
+        - chapters/lib/rec_ctor.qmd
+        - chapters/lib/rec_accessors.qmd
+        - chapters/lib/cout.qmd
+        - chapters/lib/list_directed_input.qmd
+        - chapters/lib/stdin_fields.qmd
+        - chapters/lib/numeric_fields.qmd
+        - chapters/lib/file_io.qmd
+        - chapters/lib/arr2_ctor.qmd
+        - chapters/lib/arr2_mutators.qmd
+    - part: "src/bin/sampdist.rs — SAMPDIST"
+      chapters:
+        - chapters/sampdist/main.qmd
+    - part: "src/bin/neighsim.rs — NEIGHSIM"
+      chapters:
+        - chapters/neighsim/main.qmd
+    - part: "src/bin/frescalo.rs — FRESCALO"
+      chapters:
+        - chapters/frescalo/main.qmd
+        - chapters/frescalo/writeln.qmd
+        - chapters/frescalo/trend_writers.qmd
+        - chapters/frescalo/core.qmd
+format:
+  html:
+    theme: cosmo
+    code-copy: true
+    code-fold: false
+    highlight-style: github
+    toc: true
+  pdf:
+    documentclass: scrreport
+    toc: true

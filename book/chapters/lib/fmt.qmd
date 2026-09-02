@@ -1,0 +1,73 @@
+---
+title: "`ifmt` / `ffmt`: Fortran `Iw` / `Fw.d` formatting"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. Reproduces Fortran's classic
+fixed-width number formatting (`Iw` for integers, `Fw.d` for decimals),
+right-aligned in a field of `w` characters and replaced with `*`s if the
+number doesn't fit — the same formatting rule the original `.exe`
+programs used, which is why the output files this port produces (e.g.
+`samples.txt`, `trends.txt`) line up column-for-column identically to the
+originals, byte for byte (see the project README's fidelity notes).
+
+### `ifmt`
+
+```{.rust filename="src/lib.rs" tangle="lib__ifmt"}
+pub fn ifmt(v: i64, w: usize) -> String {
+    let s = v.to_string();
+    if s.len() > w {
+        "*".repeat(w)
+    } else {
+        format!("{:>width$}", s, width = w)
+    }
+}
+```
+
+### `ffmt`
+
+```{.rust filename="src/lib.rs" tangle="lib__ffmt"}
+pub fn ffmt(v: f32, w: usize, d: usize) -> String {
+    if v.is_nan() {
+        return if w >= 3 {
+            format!("{:>width$}", "NaN", width = w)
+        } else {
+            "*".repeat(w)
+        };
+    }
+    if v.is_infinite() {
+        let (full, short) = if v > 0.0 {
+            ("Infinity", "Inf")
+        } else {
+            ("-Infinity", "-Inf")
+        };
+        if w >= full.len() {
+            return format!("{:>width$}", full, width = w);
+        }
+        if w >= short.len() {
+            return format!("{:>width$}", short, width = w);
+        }
+        return "*".repeat(w);
+    }
+    let mut s = format!("{:.*}", d, v);
+    if d == 0 {
+        s.push('.');
+    }
+    if s.len() > w {
+        if let Some(rest) = s.strip_prefix("0.") {
+            s = format!(".{}", rest);
+        } else if let Some(rest) = s.strip_prefix("-0.") {
+            s = format!("-.{}", rest);
+        }
+    }
+    if s.len() > w {
+        return "*".repeat(w);
+    }
+    format!("{:>width$}", s, width = w)
+}
+```

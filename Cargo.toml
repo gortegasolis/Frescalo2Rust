@@ -1,0 +1,29 @@
+[package]
+name = "frescalo"
+version = "1.0.0"
+edition = "2021"
+description = "Faithful Rust port of Mark Hill's FRESCALO, SAMPDIST and NEIGHSIM Fortran programs (2011)"
+# The Quarto book (book/) is documentation/tooling only, not part of the
+# crate; exclude it from `cargo package`/publish. `cargo build` already
+# ignores it since nothing in Cargo.toml references it.
+exclude = ["/book"]
+
+[lib]
+name = "frescalo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sampdist"
+path = "src/bin/sampdist.rs"
+
+[[bin]]
+name = "neighsim"
+path = "src/bin/neighsim.rs"
+
+[[bin]]
+name = "frescalo"
+path = "src/bin/frescalo.rs"
+
+[profile.release]
+# Keep strict IEEE semantics (no fast-math) so results match the Fortran originals.
+opt-level = 3

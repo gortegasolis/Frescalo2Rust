@@ -1,0 +1,274 @@
+---
+title: "`fresca` / `tfcalc`: rescaling and time-factor computation"
+---
+
+Part of `src/bin/frescalo.rs` (`frescalo` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+These two functions implement the two central calculations of the FRESCALO
+method (Hill 2011): standardizing recording effort at a site (`fresca`) and
+turning standardized frequencies into a per-species trend over time
+(`tfcalc`). Everything else in `frescalo` is really scaffolding around
+these two functions.
+
+### `fresca`
+
+## What this does
+
+For one site, this takes the raw local frequency of every species (how
+often it turns up across that site's neighbourhood) and finds a single
+multiplier, α, that rescales those frequencies so the neighbourhood's
+frequency-weighted mean frequency Φ matches a fixed target — the "sampling
+effort multiplier" of the method (Hill 2011, p.196, p.199). Intuitively: a
+well-recorded neighbourhood needs little inflation (α close to 1), while a
+poorly-recorded one needs its raw frequencies inflated a lot (larger α) to
+reach the same standard. α is found by repeatedly re-scaling a trial value
+until the rescaled mean frequency converges on the target Φ, mirroring the
+successive-approximation procedure described in the paper (Hill 2011,
+p.199). 1/α is later reported as that site's estimate of recording effort.
+Once α converges, this also writes one line to the samples-statistics file
+and one line per species to the rescaled-frequencies file — the two main
+per-site/per-species output tables of the analysis.
+
+```{.rust filename="src/bin/frescalo.rs" tangle="frescalo__fresca"}
+fn fresca(
+    m: usize,
+    n: usize,
+    itot: i32,
+    jocc: &[i32],
+    f: &mut [f32],
+    ff: &mut [f32],
+    jrank: &mut [i32],
+    samp1: &Name,
+    splist: &[Name],
+    phibig: f32,
+    fmax: f32,
+    fmin: f32,
+    wn2: f32,
+    tol: f32,
+    irepmx: i32,
+    unit7: &mut LogWriter,
+    unit8: &mut LogWriter,
+) -> (f32, f32) {
+    let mut alpha: f32 = 1.0;
+    let mut phi: f32 = 0.0;
+    let mut phi1: f32 = 0.0;
+    let mut spnum: f32 = 0.0;
+    let mut spnum1: f32 = 0.0;
+    let mut ir = irepmx;
+    let mut converged = false;
+    for iter in 1..=irepmx {
+        ir = iter;
+        for j in 1..=n {
+            if f[j] > fmax {
+                f[j] = fmax;
+            }
+            if f[j] < fmin {
+                f[j] = fmin;
+            }
+            ff[j] = -(1.0 - f[j]).ln();
+        }
+        let mut tot: f32 = 0.0;
+        let mut tot2: f32 = 0.0;
+        for j in 1..=n {
+            // new frequency after recording intensity multiplied by alpha
+            let ffij = 1.0 - (-ff[j] * alpha).exp();
+            tot += ffij;
+            tot2 += ffij * ffij;
+        }
+        phi = tot2 / tot;
+        spnum = tot;
+        if iter < 20 {
+            // successive approximation based on linear relation
+            alpha = alpha * (1.86f32 * ((1.0 - phi).ln() - (1.0 - phibig).ln())).exp();
+        } else {
+            // crude successive approximation - slower with big datasets
+            alpha = alpha * phibig / phi;
+        }
+        if iter == 1 {
+            phi1 = phi;
+            spnum1 = tot;
+        }
+        if (phi - phibig).abs() < tol {
+            converged = true;
+            break;
+        }
+    }
+    // Fortran `DO ir=1,irepmx ... enddo` leaves ir = irepmx+1 after normal
+    // (non-EXIT) completion: the loop variable is incremented and tested
+    // *before* the loop is abandoned. Confirmed against gfortran with an
+    // isolated repro of this exact do/goto pattern. This only affects the
+    // reported Iter count on non-convergence, a documented failure signal.
+    if !converged {
+        ir = irepmx + 1;
+    }
+
+    if m == 1 {
+        // 2001 header
+        writeln(
+            unit7,
+            "Location  Loc_no  No_spp Phi_in  Alpha  Wgt_n2 Phi_out  Spnum_in Spnum_out Iter",
+        );
+    }
+    let alph = if alpha > 999.99 { 999.99 } else { alpha };
+    // 2002 format(a10,2i7,f7.3,1x,f6.2,1x,f7.2,1x,f7.3,2f10.1,i5)
+    let mut r = Rec::new();
+    r.name(samp1)
+        .i(m as i64, 7)
+        .i(itot as i64, 7)
+        .f(phi1, 7, 3)
+        .x(1)
+        .f(alph, 6, 2)
+        .x(1)
+        .f(wn2, 7, 2)
+        .x(1)
+        .f(phi, 7, 3)
+        .f(spnum1, 10, 1)
+        .f(spnum, 10, 1)
+        .i(ir as i64, 5);
+    r.writeln(unit7);
+
+    for j in 1..=n {
+        ff[j] = -f[j] + (j as f32) * 1.0E-12;
+        jrank[j] = j as i32;
+    }
+    sort2(ff, jrank, n);
+    for j in 1..=n {
+        let jj = jrank[j] as usize;
+        let mut fij = f[jj];
+        if fij > fmax {
+            fij = fmax;
+        }
+        let ffij = 1.0 - (alpha * (1.0 - fij).ln()).exp();
+        let sdfij = (fij * (1.0 - fij) / wn2).sqrt();
+        let mut ffff = fij + sdfij;
+        if 1.0 - ffff < 1.0E-12 {
+            ffff = 1.0 - 1.0E-12;
+        }
+        let fffff = fij - sdfij;
+        let ffsd = 1.0 - (alpha * (1.0 - ffff).ln()).exp();
+        let fffsd = 1.0 - (alpha * (1.0 - fffff).ln()).exp();
+        // sdij is an estimate of the standard error
+        let sdij = 0.5 * (ffsd - fffsd);
+        if j == 1 && m == 1 {
+            // 2003 header
+            writeln(
+                unit8,
+                "Location   Species    Pres  Freq__  Freq_1 SD_Frq1  Rank  Rank_1",
+            );
+        }
+        ff[jj] = ffij;
+        if f[jj] > 0.00005 {
+            // 2004 format(a10,1x,a10,1x,i4,3f8.4,1x,i5,f8.3)
+            let mut r = Rec::new();
+            r.name(samp1)
+                .x(1)
+                .name(&splist[jj])
+                .x(1)
+                .i(jocc[jj] as i64, 4)
+                .f(f[jj], 8, 4)
+                .f(ffij, 8, 4)
+                .f(sdij, 8, 4)
+                .x(1)
+                .i(j as i64, 5)
+                .f((j as f32) / spnum, 8, 3);
+            r.writeln(unit8);
+        }
+    }
+    (phi1, spnum)
+}
+```
+
+### `tfcalc`
+
+## What this does
+
+For one species in one time period, this estimates a **time factor**: a
+single number describing how that species' true frequency in that period
+compares to a baseline of 1, given how much sampling effort was actually
+spent looking for it at each site and how detectable it was. This is the
+xjt of the paper's trend model, found the same way the paper describes: by
+starting from a trial value of 1 and repeatedly rescaling it until the
+predicted number of records matches the observed number (Hill 2011,
+p.200). A time factor above 1 means the species was found more than
+expected for that level of effort (increasing); below 1 means less than
+expected (declining). It also returns a standard error for the time
+factor, obtained by re-running the same iteration against a target one
+standard deviation higher than the observed total (Hill 2011, p.200).
+
+```{.rust filename="src/bin/frescalo.rs" tangle="frescalo__tfcalc"}
+fn tfcalc(iocc: &[i32], smpint: &[f32], fff: &[f32], m: usize) -> (f32, f32, f32, i32, f32, i32, i32) {
+    const KMAX: i32 = 100;
+    let mut tf: f32 = 1.0;
+    let mut esttot: f32 = 0.0;
+    let mut estvar: f32 = 0.0;
+    let mut sptot: f32 = 0.0;
+    let mut jtot: i32 = 0;
+    let mut ic1: i32 = 0;
+    let mut ic2: i32 = 0;
+    for _ in 1..=KMAX {
+        esttot = 0.0;
+        estvar = 0.0;
+        sptot = 0.0;
+        jtot = 0;
+        ic1 = 0;
+        ic2 = 0;
+        for i in 1..=m {
+            let mut wgt: f32 = 1.0;
+            if smpint[i] < 0.0995 {
+                wgt = 10.0 * smpint[i] + 0.005;
+            }
+            // probability of finding the species, times the sampling intensity
+            let mut pfac = smpint[i] * fff[i];
+            if pfac > 0.0 {
+                ic1 += 1;
+            }
+            if pfac > 0.98 {
+                pfac = 0.98;
+                ic2 += 1;
+            }
+            // fudge to allow taking logs; otherwise there is a danger pfac=1
+            let plog = -(1.0 - pfac).ln();
+            let estval = 1.0 - (-plog * tf).exp();
+            esttot += wgt * estval;
+            estvar += wgt * wgt * estval * (1.0 - estval);
+            sptot += wgt * (iocc[i] as f32);
+            jtot += iocc[i];
+        }
+        if (sptot - esttot).abs() < 0.0005 {
+            break;
+        }
+        tf = tf * sptot / (esttot + 0.0000001);
+    }
+
+    // sptot1 is precisely 1 standard deviation bigger than sptot;
+    // recalculate with this target value to obtain the standard error of tf.
+    let sptot1 = sptot + estvar.sqrt();
+    let mut tf1 = tf;
+    let mut esttt1: f32;
+    for _ in 1..=KMAX {
+        esttt1 = 0.0;
+        for i in 1..=m {
+            let mut wgt: f32 = 1.0;
+            if smpint[i] < 0.0995 {
+                wgt = 10.0 * smpint[i] + 0.005;
+            }
+            let mut pfac = smpint[i] * fff[i];
+            if pfac > 0.98 {
+                pfac = 0.98;
+            }
+            let plog = -(1.0 - pfac).ln();
+            let estval = 1.0 - (-plog * tf1).exp();
+            esttt1 += wgt * estval;
+        }
+        if (sptot1 - esttt1).abs() < 0.0005 {
+            break;
+        }
+        tf1 = tf1 * sptot1 / (esttt1 + 0.0000001);
+    }
+
+    let sd = tf1 - tf;
+    (tf, sd, sptot, jtot, esttot, ic1, ic2)
+}
+```

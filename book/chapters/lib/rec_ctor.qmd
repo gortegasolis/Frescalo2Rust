@@ -1,0 +1,34 @@
+---
+title: "`Rec`: constructors"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `Rec` builds up one output line
+field by field (a site name, then a number, then another number, ...),
+mimicking Fortran's fixed-column `WRITE` statements. `new` starts an empty
+line; `raw` appends already-formatted bytes verbatim (used when copying a
+30-character record straight into a log message). See
+[`rec_accessors.qmd`](rec_accessors.qmd) for the methods that actually add
+formatted fields.
+
+### `Rec::new`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__new"}
+    pub fn new() -> Self {
+        Rec { buf: Vec::new() }
+    }
+```
+
+### `Rec::raw`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__raw"}
+    pub fn raw(&mut self, s: &[u8]) -> &mut Self {
+        self.buf.extend_from_slice(s);
+        self
+    }
+```

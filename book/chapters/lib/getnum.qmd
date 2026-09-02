@@ -1,0 +1,47 @@
+---
+title: "`getnum`: numeric token parsing"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what this function does, and, where relevant, which Fortran subroutine/statement it ports. -->
+
+## What this does
+
+Converts a 10-character text field into an actual floating-point number.
+Its main job is turning the neighbourhood-weight column written by
+[`neighsim`](../neighsim/main.qmd) — the `w_ii'` weight for one
+neighbour pair, e.g. 0.108 in the paper's worked example (Hill 2011,
+p.197) — from text back into a number `frescalo` can multiply and sum
+with. It's plumbing: the numeric parsing itself isn't part of the method,
+only the value it recovers is.
+
+```{.rust filename="src/lib.rs" tangle="lib__getnum"}
+pub fn getnum(weight: &Name) -> f32 {
+    let mut w = *weight;
+    let mut idot = false;
+    let mut kblank: Option<usize> = None;
+    for k in 0..10 {
+        if w[k] == b'.' {
+            idot = true;
+        }
+        if w[k] == BLANK {
+            kblank = Some(k);
+            break;
+        }
+    }
+    if !idot {
+        if let Some(k) = kblank {
+            w[k] = b'.';
+        }
+        // (If all 10 characters are non-blank with no dot, the original
+        //  writes past w(10); we simply leave the word unchanged.)
+    }
+    let s: Vec<u8> = w.iter().filter(|&&c| c != BLANK).copied().collect();
+    if s.is_empty() {
+        return 0.0;
+    }
+    let s = String::from_utf8_lossy(&s);
+    s.parse::<f32>().unwrap_or(0.0)
+}
+```

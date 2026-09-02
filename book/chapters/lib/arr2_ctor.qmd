@@ -1,0 +1,36 @@
+---
+title: "`Arr2`: constructor and getter"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `Arr2` is a plain 2-D table (rows
+× columns), standing in for the original Fortran's statically-sized 2-D
+arrays — e.g. one row per site, one column per species, holding whether
+that species was recorded there (`idata`), whether it counts as a
+benchmark species there (`ibench`), or its pooled local frequency
+(`ffij`). `new` allocates a table of a given size, pre-filled with a
+starting value; `at` reads one cell.
+
+### `Arr2::new`
+
+```{.rust filename="src/lib.rs" tangle="lib__Arr2__new"}
+    pub fn new(nrows: usize, ncols: usize, init: T) -> Self {
+        Arr2 {
+            data: vec![init; (nrows + 1) * (ncols + 1)],
+            stride: ncols + 1,
+        }
+    }
+```
+
+### `Arr2::at`
+
+```{.rust filename="src/lib.rs" tangle="lib__Arr2__at"}
+    pub fn at(&self, i: usize, j: usize) -> T {
+        self.data[i * self.stride + j]
+    }
+```

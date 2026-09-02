@@ -1,0 +1,140 @@
+---
+title: "`DataReader`: token-stream file reader"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `DataReader` reads the plain-text
+input files line by line and splits each line into (up to) three
+whitespace-separated fields — this is how a line like `NB13 Amblystegium
+1990` in an occurrence file, or `NB13 ND04 0.108` in a neighbourhood
+weights file, gets turned into the three fixed-width text fields the rest
+of the program works with. `rewind` lets a file be read through twice
+(`sampdist` reads its location file once to collect all site codes, then
+again to read the coordinates); `getd` reads one line and returns `false`
+once the file is exhausted.
+
+### `DataReader::new`
+
+```{.rust filename="src/lib.rs" tangle="lib__DataReader__new"}
+    pub fn new(f: File) -> Self {
+        DataReader {
+            reader: BufReader::new(f),
+        }
+    }
+```
+
+### `DataReader::rewind`
+
+```{.rust filename="src/lib.rs" tangle="lib__DataReader__rewind"}
+    pub fn rewind(&mut self) {
+        use std::io::Seek;
+        let _ = self.reader.seek(std::io::SeekFrom::Start(0));
+    }
+```
+
+### `DataReader::getd`
+
+```{.rust filename="src/lib.rs" tangle="lib__DataReader__getd"}
+    pub fn getd(&mut self, w1: &mut Name, w2: &mut Name, w3: &mut Name) -> bool {
+        let mut line = String::new();
+        match self.reader.read_line(&mut line) {
+            Ok(0) => return false, // EOF -> iend = 1
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+        if line.ends_with('\n') {
+            line.pop();
+        }
+        // Fortran read with format a80: take at most 80 bytes, blank-padded.
+        // Windows CRLF files: strip the trailing CR, as the records seen by
+        // the original Windows executables never contained it.
+        let bytes = line.as_bytes();
+        let mut len = bytes.len();
+        if len > 0 && bytes[len - 1] == b'\r' {
+            len -= 1;
+        }
+        let mut b = [BLANK; 80];
+        let n = len.min(80);
+        b[..n].copy_from_slice(&bytes[..n]);
+
+        // k1 = first non-blank
+        let mut k = 0usize;
+        while k < 80 && b[k] == BLANK {
+            k += 1;
+        }
+        if k >= 80 {
+            return true; // blank record: return with fields unchanged
+        }
+        let k1 = k;
+        // k2 = last character of word 1
+        let mut k = k1;
+        while k < 80 && b[k] != BLANK {
+            k += 1;
+        }
+        if k >= 80 {
+            return true; // no terminating blank: return unchanged
+        }
+        let k2 = k - 1;
+        // k3 = first character of word 2 (scan starts at k2+2)
+        let mut k = k2 + 2;
+        while k < 80 && b[k] == BLANK {
+            k += 1;
+        }
+        if k >= 80 {
+            return true;
+        }
+        let k3 = k;
+        // k4 = last character of word 2
+        let mut k = k3;
+        while k < 80 && b[k] != BLANK {
+            k += 1;
+        }
+        if k >= 80 {
+            return true;
+        }
+        let k4 = k - 1;
+        // k5 = first character of word 3 (scan starts at k4+2)
+        let mut k = k4 + 2;
+        while k < 80 && b[k] == BLANK {
+            k += 1;
+        }
+        let k5 = if k >= 80 { 79 } else { k }; // Fortran: if(k.gt.79) k=80
+        // k6 = last character of word 3
+        let mut k = k5;
+        while k < 80 && b[k] != BLANK {
+            k += 1;
+        }
+        let mut k6 = if k >= 80 { 79 } else { k - 1 };
+        if k5 == 79 {
+            k6 = 79;
+        }
+
+        let mut nw1 = [BLANK; 10];
+        for k in k1..=k2 {
+            if k < k1 + 10 {
+                nw1[k - k1] = b[k];
+            }
+        }
+        let mut nw2 = [BLANK; 10];
+        for k in k3..=k4 {
+            if k < k3 + 10 {
+                nw2[k - k3] = b[k];
+            }
+        }
+        let mut nw3 = [BLANK; 10];
+        for k in k5..=k6 {
+            if k < k5 + 9 {
+                nw3[k - k5] = b[k];
+            }
+        }
+        *w1 = nw1;
+        *w2 = nw2;
+        *w3 = nw3;
+        true
+    }
+```

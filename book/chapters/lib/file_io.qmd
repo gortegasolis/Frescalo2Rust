@@ -1,0 +1,67 @@
+---
+title: "`filin` / `filout` / `hold`: file-open and modal-hold helpers"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `filin`/`filout` implement the
+"type a file name" prompts, re-prompting if the input file doesn't exist
+or the output file would overwrite an existing one (the originals refuse
+to overwrite outputs, so re-running a program with the same output name
+fails safely rather than silently clobbering a previous result). `hold`
+prints "Press \<RETURN\> to exit" and waits — the modal pause the
+original console programs show once a run has finished (or hit a fatal
+data-size limit) before the window closes.
+
+### `filin`
+
+```{.rust filename="src/lib.rs" tangle="lib__filin"}
+pub fn filin(stdin: &mut impl BufRead) -> (String, File) {
+    loop {
+        let name = read_a20(stdin);
+        match File::open(&name) {
+            Ok(f) => return (name, f),
+            Err(_) => {
+                cout("");
+                cout("  *** ERROR *** File does not exist");
+                cout(" Type another name");
+            }
+        }
+    }
+}
+```
+
+### `filout`
+
+```{.rust filename="src/lib.rs" tangle="lib__filout"}
+pub fn filout(stdin: &mut impl BufRead) -> (String, File) {
+    loop {
+        let name = read_a20(stdin);
+        match OpenOptions::new().write(true).create_new(true).open(&name) {
+            Ok(f) => return (name, f),
+            Err(_) => {
+                cout("");
+                cout("  *** ERROR *** File already exists");
+                cout(" Type another name");
+            }
+        }
+    }
+}
+```
+
+### `hold`
+
+```{.rust filename="src/lib.rs" tangle="lib__hold"}
+pub fn hold(stdin: &mut impl BufRead) -> ! {
+    let mut o = io::stdout();
+    let _ = o.write_all(b"\n\nPress <RETURN> to exit\n\n\n----------------------\n");
+    let _ = o.flush();
+    let mut s = String::new();
+    let _ = stdin.read_line(&mut s);
+    std::process::exit(0);
+}
+```

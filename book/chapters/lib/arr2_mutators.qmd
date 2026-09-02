@@ -1,0 +1,37 @@
+---
+title: "`Arr2`: mutators"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `set` overwrites one cell of an
+[`Arr2`](arr2_ctor.qmd) table; `add` accumulates a value into it. `add` is
+how `frescalo` builds up each site's pooled local frequency for each
+species — every neighbour's weighted contribution is added into the
+site×species table one neighbour at a time as the weights file is read,
+which is the direct computation of the neighbourhood-frequency formula
+(a weighted average of presence/absence across the neighbourhood) that the
+method is built on (Hill 2011, p.197–198).
+
+### `Arr2::set`
+
+```{.rust filename="src/lib.rs" tangle="lib__Arr2__set"}
+    pub fn set(&mut self, i: usize, j: usize, v: T) {
+        self.data[i * self.stride + j] = v;
+    }
+```
+
+### `Arr2::add`
+
+```{.rust filename="src/lib.rs" tangle="lib__Arr2__add"}
+    pub fn add(&mut self, i: usize, j: usize, v: T)
+    where
+        T: std::ops::AddAssign,
+    {
+        self.data[i * self.stride + j] += v;
+    }
+```

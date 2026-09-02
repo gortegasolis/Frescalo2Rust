@@ -1,0 +1,22 @@
+---
+title: "`cout`: console output helper"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what this function does, and, where relevant, which Fortran subroutine/statement it ports. -->
+
+## What this does
+
+Plumbing, not part of the method itself: prints one line to the screen,
+flushed immediately. Used for every interactive prompt and progress
+message the programs print while running.
+
+```{.rust filename="src/lib.rs" tangle="lib__cout"}
+pub fn cout(s: &str) {
+    let mut o = io::stdout();
+    let _ = o.write_all(s.as_bytes());
+    let _ = o.write_all(b"\n");
+    let _ = o.flush();
+}
+```

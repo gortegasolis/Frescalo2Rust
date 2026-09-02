@@ -1,0 +1,72 @@
+---
+title: "`Rec`: field accessors and line writer"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. These append one more field to a
+[`Rec`](rec_ctor.qmd) output line under construction: `s` for raw text,
+`name` for a site/species/time code, `x` for `n` blank characters (column
+padding/spacing), `i` for a right-aligned whole number, `f` for a
+right-aligned decimal number. `writeln` finishes the line and writes it
+out. Chaining these calls is what produces each row of, for example, the
+sample-statistics or rescaled-frequency output tables — the Rust
+equivalent of the original's fixed-format `WRITE` statements.
+
+### `Rec::s`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__s"}
+    pub fn s(&mut self, s: &str) -> &mut Self {
+        self.buf.extend_from_slice(s.as_bytes());
+        self
+    }
+```
+
+### `Rec::name`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__name"}
+    pub fn name(&mut self, n: &Name) -> &mut Self {
+        self.buf.extend_from_slice(n);
+        self
+    }
+```
+
+### `Rec::x`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__x"}
+    pub fn x(&mut self, n: usize) -> &mut Self {
+        self.buf.extend(std::iter::repeat(BLANK).take(n));
+        self
+    }
+```
+
+### `Rec::i`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__i"}
+    pub fn i(&mut self, v: i64, w: usize) -> &mut Self {
+        self.s(&ifmt(v, w));
+        self
+    }
+```
+
+### `Rec::f`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__f"}
+    pub fn f(&mut self, v: f32, w: usize, d: usize) -> &mut Self {
+        self.s(&ffmt(v, w, d));
+        self
+    }
+```
+
+### `Rec::writeln`
+
+```{.rust filename="src/lib.rs" tangle="lib__Rec__writeln"}
+    pub fn writeln<W: Write>(&self, w: &mut W) {
+        w.write_all(&self.buf).unwrap();
+        w.write_all(b"\n").unwrap();
+    }
+```

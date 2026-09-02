@@ -1,0 +1,57 @@
+---
+title: "`write_trend` / `write_zero_trend`: trend-file writers"
+---
+
+Part of `src/bin/frescalo.rs` (`frescalo` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+These two write one line of the trends output file per species/time-period
+combination: the time factor and its standard deviation computed by
+[`tfcalc`](core.qmd), plus supporting counts (how many records, how many
+sites had non-zero/near-saturated detection probability). `write_trend`
+writes an actual computed result; `write_zero_trend` writes a padding row
+(all zeros) for species/period combinations that had no records at all, so
+that every species has one row per time period in the output even where it
+was never seen — this keeps the trend series unbroken for plotting change
+over time, as in the paper's epiphyte example (Hill 2011, Fig. 6, p.201).
+
+### `write_trend`
+
+```{.rust filename="src/bin/frescalo.rs" tangle="frescalo__write_trend"}
+fn write_trend<W: Write>(
+    w: &mut W,
+    sp: &Name,
+    tim: &Name,
+    tf: f32,
+    sd: f32,
+    jtot: i32,
+    spt: f32,
+    est: f32,
+    ic1: i32,
+    ic2: i32,
+) {
+    let mut r = Rec::new();
+    r.name(sp)
+        .x(1)
+        .name(tim)
+        .f(tf, 8, 3)
+        .f(sd, 7, 3)
+        .i(jtot as i64, 7)
+        .f(spt, 7, 1)
+        .f(est, 7, 1)
+        .i(ic1 as i64, 7)
+        .i(ic2 as i64, 7);
+    r.writeln(w);
+}
+```
+
+### `write_zero_trend`
+
+```{.rust filename="src/bin/frescalo.rs" tangle="frescalo__write_zero_trend"}
+fn write_zero_trend<W: Write>(w: &mut W, sp: &Name, tim: &Name) {
+    write_trend(w, sp, tim, 0.0, 0.0, 0, 0.0, 0.0, 0, 0);
+}
+```

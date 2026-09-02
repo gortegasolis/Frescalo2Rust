@@ -1,0 +1,46 @@
+name: Build release binaries
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux-x86_64
+          - os: windows-latest
+            artifact: windows-x86_64
+          - os: macos-latest
+            artifact: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binaries
+        run: cargo build --release
+
+      - name: Verify against Fortran reference (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update && sudo apt-get install -y gfortran
+          ./verify_against_fortran.sh
+
+      - name: Package binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/release/sampdist.exe target/release/neighsim.exe target/release/frescalo.exe dist/
+          else
+            cp target/release/sampdist target/release/neighsim target/release/frescalo dist/
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frescalo-${{ matrix.artifact }}
+          path: dist/

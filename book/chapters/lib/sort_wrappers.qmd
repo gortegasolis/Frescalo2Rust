@@ -1,0 +1,33 @@
+---
+title: "`sort30` / `sort_real`: name and real-array sort wrappers"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. `sort30` sorts the big arrays of
+(site, species, time) or (neighbour, target, weight) triples built by
+[`make_rec30`](rec30.qmd), so that records sharing the same first field(s)
+end up next to each other and can be processed group by group.
+`sort_real` sorts a plain array of numbers — used, for example, to find
+the percentile of estimated recording effort across all sites at the end
+of a `frescalo` run.
+
+### `sort30`
+
+```{.rust filename="src/lib.rs" tangle="lib__sort30"}
+pub fn sort30(dict: &mut [Rec30], n: usize) {
+    dict[1..=n].sort_unstable();
+}
+```
+
+### `sort_real`
+
+```{.rust filename="src/lib.rs" tangle="lib__sort_real"}
+pub fn sort_real(dict: &mut [f32], n: usize) {
+    dict[1..=n].sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+}
+```

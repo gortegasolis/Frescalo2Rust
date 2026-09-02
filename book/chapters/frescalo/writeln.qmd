@@ -1,0 +1,20 @@
+---
+title: "`writeln`: output line formatting helper"
+---
+
+Part of `src/bin/frescalo.rs` (`frescalo` binary/module).
+
+<!-- TODO: describe what this function does, and, where relevant, which Fortran subroutine/statement it ports. -->
+
+## What this does
+
+A one-line helper: writes a string followed by a newline to a file. It's
+plumbing, not part of the method itself — used throughout `frescalo` to
+write the log file and the headers of the output tables.
+
+```{.rust filename="src/bin/frescalo.rs" tangle="frescalo__writeln"}
+fn writeln<W: Write>(w: &mut W, s: &str) {
+    w.write_all(s.as_bytes()).unwrap();
+    w.write_all(b"\n").unwrap();
+}
+```

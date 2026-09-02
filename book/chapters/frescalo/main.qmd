@@ -1,0 +1,651 @@
+---
+title: "`main`: CLI entry point and orchestration"
+---
+
+Part of `src/bin/frescalo.rs` (`frescalo` binary/module).
+
+## What this does
+
+This is the whole FRESCALO analysis, run start to finish, in the same
+interactive prompt-by-prompt order as the original Fortran program. It asks
+for: the occurrence records (site, species, time period), the neighbourhood
+weights produced by [`neighsim`](../neighsim/main.qmd), an optional list of
+species to exclude from the benchmark set, three output file names, a
+target local frequency Φ, and a benchmark limit R*.
+
+For every site it then: gathers presence/absence records from that site's
+whole neighbourhood into a weighted local frequency for each species;
+rescales those frequencies so that recording effort becomes comparable
+across sites, however unevenly they were actually surveyed (delegated to
+[`fresca`](core.qmd)); and finally estimates, for every species and time
+period, a time factor describing how that species' frequency has changed
+(delegated to [`tfcalc`](core.qmd)), writing the results to the trends
+file.
+
+The Φ and R* it prompts for (defaulting to 0.74 and 0.2703) are the same
+two parameters the method is built around: Φ is the standard frequency a
+well-sampled neighbourhood is assumed to reach, and R* sets the cutoff rank
+below which a species counts as a "benchmark" species for measuring
+recording effort at that site (Hill 2011, p.199–200). The 0.74 default
+matches the value Hill used for the bryophyte data set discussed in the
+paper, chosen from the high end of observed neighbourhood frequencies
+because bryophytes are never quite exhaustively recorded (Hill 2011,
+p.199).
+
+```{.rust filename="src/bin/frescalo.rs" tangle="frescalo__main"}
+fn main() {
+    let mut stdin = io::stdin().lock();
+
+    // Allocations (1-based indexing; element 0 unused), mirroring the
+    // original's statically dimensioned arrays.
+    let mut sa = vec![blank_name(); MM + 2];
+    let mut sp = vec![blank_name(); NN + 2];
+    let mut tim = vec![blank_name(); NNT + 2];
+    let mut bnchx = vec![blank_name(); NN + 2];
+    let mut numwgt = vec![0i32; MM + 2];
+    let mut idat = vec![0i32; MM + 2];
+    let mut iitot = vec![0i32; MM + 2];
+    let mut jrank = vec![0i32; NN + 2];
+    let mut iocc = vec![0i32; MM + 2];
+    let mut jocc = vec![0i32; NN + 2];
+    let mut lendat: Arr2<i32> = Arr2::new(NN + 1, NNT + 1, 0);
+    let mut idata: Arr2<i32> = Arr2::new(MM + 1, NN + 1, 0);
+    let mut ibench: Arr2<i32> = Arr2::new(MM + 1, NN + 1, 0);
+    let mut sampef: Arr2<f32> = Arr2::new(MM + 1, NNT + 1, 1.0E-7);
+    let mut ffij: Arr2<f32> = Arr2::new(MM + 1, NN + 1, 0.0);
+    let mut smpint = vec![0.0f32; MM + 2];
+    let mut fff = vec![0.0f32; MM + 2];
+    let mut wgttot = vec![0.0f32; MM + 2];
+    let mut wgtt2 = vec![0.0f32; MM + 2];
+    let mut f = vec![0.0f32; NN + 2];
+    let mut ff = vec![0.0f32; NN + 2];
+    let mut ffff = vec![0.0f32; MM + 2];
+    let mut abtot = vec![0.0f32; MM + 2];
+    let mut bwght = vec![1.0f32; NN + 2]; // 0.001 for unsuitable bench species
+    let mut ddijt = vec![[b' '; 30]; NNDAT + 2];
+    let mut wneigh = vec![[b' '; 30]; NNWGT + 2];
+
+    // Banner (format 1998; the leading // produces two blank records)
+    cout("");
+    cout("");
+    cout(" FRESCALO - Trend_analysis using local frequencies");
+    cout(" written by Mark Hill, January-June 2011");
+    cout("");
+    cout(" Input limits:");
+    cout(&format!("    Number of samples = {}", ifmt(MM as i64, 7)));
+    cout(&format!("    Number of species = {}", ifmt(NN as i64, 7)));
+    cout(&format!("    Number of time periods = {}", ifmt(NNT as i64, 7)));
+    cout(&format!("    Number of observations = {}", ifmt(NNDAT as i64, 7)));
+    cout(&format!(
+        "    Number of neighbourhood weights = {}",
+        ifmt(NNWGT as i64, 7)
+    ));
+    cout("");
+    cout(" Type name of log file ...");
+
+    let (fileou, flog) = filout(&mut stdin);
+    let mut unit10 = BufWriter::new(flog);
+
+    // Log banner (format 1999)
+    writeln(&mut unit10, " Log file for FRESCALO");
+    writeln(&mut unit10, "");
+    writeln(&mut unit10, " Input limits:");
+    writeln(&mut unit10, &format!("    Number of samples = {}", ifmt(MM as i64, 7)));
+    writeln(&mut unit10, &format!("    Number of species = {}", ifmt(NN as i64, 7)));
+    writeln(&mut unit10, &format!("    Number of time periods = {}", ifmt(NNT as i64, 7)));
+    writeln(&mut unit10, &format!("    Number of observations = {}", ifmt(NNDAT as i64, 7)));
+    writeln(
+        &mut unit10,
+        &format!("    Number of neighbourhood weights = {}", ifmt(NNWGT as i64, 7)),
+    );
+    writeln(&mut unit10, "");
+    writeln(&mut unit10, " Type name of log file ...");
+    writeln(&mut unit10, &format!("{:<20}", fileou)); // 1000 format(a20)
+
+    cout(" Type occurrence input file [sample species time] ...");
+    writeln(&mut unit10, " Type occurrence input file [sample species time] ...");
+    let (filein, focc) = filin(&mut stdin);
+    writeln(&mut unit10, &format!("{:<20}", filein));
+    let mut occ_reader = DataReader::new(focc);
+
+    cout(" Type neighbourhood weight input file ...");
+    writeln(&mut unit10, " Type neighbourhood weight input file ...");
+    let (filein, fwgt) = filin(&mut stdin);
+    writeln(&mut unit10, &format!("{:<20}", filein));
+    let mut wgt_reader = DataReader::new(fwgt);
+
+    cout(" Type file with species to exclude from benchmarks ");
+    cout("     or press <RETURN> if no exclusions...");
+    writeln(&mut unit10, " Type file with species to exclude from benchmarks ");
+    writeln(&mut unit10, "     or press <RETURN> if no exclusions...");
+    // label 20: on open error the original silently re-reads, without
+    // reprinting the prompt or any error message.
+    let mut nbnchx: usize = 0;
+    loop {
+        let filein = read_a20(&mut stdin);
+        if filein.is_empty() {
+            writeln(&mut unit10, "<No exclusions>");
+            break;
+        }
+        match std::fs::File::open(&filein) {
+            Ok(fx) => {
+                writeln(&mut unit10, &format!("{:<20}", filein));
+                // read(2,1001,end=25) with format a10: first 10 bytes of each
+                // line, blank-padded.
+                let br = io::BufReader::new(fx);
+                let mut lines = br.lines();
+                for jj in 1..=NN {
+                    match lines.next() {
+                        Some(Ok(line)) => {
+                            let bytes = line.as_bytes();
+                            let mut len = bytes.len();
+                            if len > 0 && bytes[len - 1] == b'\r' {
+                                len -= 1;
+                            }
+                            let mut nm = blank_name();
+                            let c = len.min(10);
+                            nm[..c].copy_from_slice(&bytes[..c]);
+                            nbnchx = jj;
+                            bnchx[nbnchx] = nm;
+                        }
+                        _ => break,
+                    }
+                }
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+
+    cout(" Type name of sample stats output file...");
+    writeln(&mut unit10, " Type name of sample stats output file...");
+    let (fileou, fsam) = filout(&mut stdin);
+    writeln(&mut unit10, &format!("{:<20}", fileou));
+    let mut unit7 = BufWriter::new(fsam);
+
+    cout(" Type name of rescaled frequency file...");
+    writeln(&mut unit10, " Type name of rescaled frequency file...");
+    let (fileou, ffq) = filout(&mut stdin);
+    writeln(&mut unit10, &format!("{:<20}", fileou));
+    let mut unit8 = BufWriter::new(ffq);
+
+    cout(" Type name of trend output file...");
+    writeln(&mut unit10, " Type name of trend output file...");
+    let (fileou, ftr) = filout(&mut stdin);
+    writeln(&mut unit10, &format!("{:<20}", fileou));
+    let mut unit9 = BufWriter::new(ftr);
+
+    // Target value of phi (label 40)
+    let mut phibig = PHIDEF;
+    loop {
+        let p = format!(
+            " Type target value of local frequency phi (default={})...",
+            ffmt(PHIDEF, 4, 2)
+        );
+        cout(&p);
+        writeln(&mut unit10, &p);
+        if let Some(v) = read_f8_4(&mut stdin) {
+            phibig = v;
+        }
+        if phibig == 0.0 {
+            phibig = PHIDEF;
+        }
+        if phibig > 0.95 || phibig < 0.50 {
+            cout(" ***ERROR*** Outside range 0.50 to 0.95");
+            continue;
+        }
+        break;
+    }
+    // 2011 format has a trailing slash: blank line follows
+    let p = format!(" Target value is {}", ffmt(phibig, 4, 2));
+    cout(&p);
+    cout("");
+    writeln(&mut unit10, &p);
+    writeln(&mut unit10, "");
+
+    // Benchmark limit (label 46)
+    let mut blim = BLMDEF;
+    loop {
+        let p = format!(" Type value of Benchmark Limit (default={})...", ffmt(BLMDEF, 4, 2));
+        cout(&p);
+        writeln(&mut unit10, &p);
+        if let Some(v) = read_f8_4(&mut stdin) {
+            blim = v;
+        }
+        if blim == 0.0 {
+            blim = BLMDEF;
+        }
+        if blim > 0.5 || blim < 0.08 {
+            cout(" ***ERROR*** Outside range 0.08 to 0.5");
+            continue;
+        }
+        break;
+    }
+    // 2014 format has a trailing slash: blank line follows
+    let p = format!(" Benchmark limit is {}", ffmt(blim, 4, 2));
+    cout(&p);
+    cout("");
+    writeln(&mut unit10, &p);
+    writeln(&mut unit10, "");
+
+    // ------------------------------------------------------------------
+    // Read in data
+    // ------------------------------------------------------------------
+    let mut m: usize = 0;
+    let mut n: usize = 0;
+    let mut nt: usize = 0;
+    let mut ndtji: usize = 0;
+    let mut nwgt: usize = 0;
+
+    let mut samp = blank_name();
+    let mut samp1 = blank_name();
+    let mut spec = blank_name();
+    let mut time = blank_name();
+    let mut weight = blank_name();
+
+    // Read hectad weights (samp, samp1, weight); stored as (samp1,samp,weight)
+    // so that all targets of which samp1 is a neighbour are together.
+    loop {
+        if nwgt == 0 {
+            ld_line("Reading in smoothing weights from samples");
+        }
+        if !wgt_reader.getd(&mut samp, &mut samp1, &mut weight) {
+            break;
+        }
+        nwgt += 1;
+        if nwgt % 20000 == 0 {
+            ld_line(&format!(
+                "Weights {}{}{}",
+                name_to_string(&samp),
+                name_to_string(&samp1),
+                ld_i(nwgt as i64)
+            ));
+        }
+        if nwgt > NNWGT {
+            let p = format!(
+                " No of neighbourhood weights > maximum which is{}",
+                ifmt(NNWGT as i64, 5)
+            );
+            cout(&p);
+            writeln(&mut unit10, &p);
+            hold(&mut stdin);
+        }
+        addwrd(&mut sa, &mut m, &samp);
+        addwrd(&mut sa, &mut m, &samp1);
+        wneigh[nwgt] = make_rec30(&samp1, &samp, &weight);
+    }
+
+    cout(" Sorting local frequency weights ...");
+    sort30(&mut wneigh, nwgt);
+
+    // Read the occurrence data [sample species time]
+    loop {
+        if !occ_reader.getd(&mut samp, &mut spec, &mut time) {
+            break;
+        }
+        let i = binfnd(&sa, m, &samp);
+        if i == 0 {
+            if samp != samp1 {
+                // 2996: location in species data but not in neighbourhood weights
+                let mut r = Rec::new();
+                r.s("*** ").name(&samp).s(
+                    " location ignored - in species data but not listed in neighbourhood weights",
+                );
+                r.writeln(&mut unit10);
+            }
+            samp1 = samp;
+            continue;
+        }
+        addwrd(&mut sp, &mut n, &spec);
+        addwrd(&mut tim, &mut nt, &time);
+        if nt > NNT {
+            let p = format!(
+                " Number of time periods exceeds maximum which is{}",
+                ifmt(NNT as i64, 5)
+            );
+            cout(&p);
+            writeln(&mut unit10, &p);
+            hold(&mut stdin);
+        }
+        ndtji += 1;
+        if ndtji % 20000 == 0 {
+            ld_line(&format!(
+                "{}{}{}{}",
+                name_to_string(&samp),
+                name_to_string(&spec),
+                name_to_string(&time),
+                ld_i(ndtji as i64)
+            ));
+        }
+        ddijt[ndtji] = make_rec30(&samp, &spec, &time);
+    }
+
+    // 2505 / 2506: report actual numbers
+    let rep = |unit10: &mut LogWriter| {
+        writeln(unit10, "");
+        writeln(unit10, " Actual numbers in data");
+        writeln(unit10, &format!("    Number of samples      {}", ifmt(m as i64, 8)));
+        writeln(unit10, &format!("    Number of species      {}", ifmt(n as i64, 8)));
+        writeln(unit10, &format!("    Number of time periods {}", ifmt(nt as i64, 8)));
+        writeln(unit10, &format!("    Number of observations {}", ifmt(ndtji as i64, 8)));
+        writeln(unit10, &format!("    Neighbourhood weights  {}", ifmt(nwgt as i64, 8)));
+        writeln(unit10, &format!("    Benchmark exclusions   {}", ifmt(nbnchx as i64, 8)));
+        writeln(unit10, "");
+    };
+    cout("");
+    cout(" Actual numbers in data");
+    cout(&format!("    Number of samples      {}", ifmt(m as i64, 8)));
+    cout(&format!("    Number of species      {}", ifmt(n as i64, 8)));
+    cout(&format!("    Number of time periods {}", ifmt(nt as i64, 8)));
+    cout(&format!("    Number of observations {}", ifmt(ndtji as i64, 8)));
+    cout(&format!("    Neighbourhood weights  {}", ifmt(nwgt as i64, 8)));
+    cout(&format!("    Benchmark exclusions   {}", ifmt(nbnchx as i64, 8)));
+    cout("");
+    rep(&mut unit10);
+    if nbnchx > 0 {
+        writeln(&mut unit10, " Benchmark exclusions");
+        for ib in 1..=nbnchx {
+            let mut r = Rec::new();
+            r.x(4).name(&bnchx[ib]);
+            r.writeln(&mut unit10);
+        }
+    }
+
+    cout(" Sorting main data ...");
+    sort30(&mut ddijt, ndtji);
+
+    // First calculate sum of weights for each sample
+    for iwgt in 1..=nwgt {
+        let dtji = wneigh[iwgt];
+        let f_neigh = rec30_field(&dtji, 0); // samp1: the neighbour
+        let f_targ = rec30_field(&dtji, 1); // samp: the target
+        let f_wgt = rec30_field(&dtji, 2);
+        let i = binfnd(&sa, m, &f_targ);
+        let ii = binfnd(&sa, m, &f_neigh);
+        let wgt = getnum(&f_wgt);
+        wgttot[i] += wgt;
+        wgtt2[i] += wgt * wgt;
+        numwgt[ii] += 1;
+    }
+
+    // Now calculate the number of data items for each sample in main data
+    let mut spec1 = blank_name();
+    for idtji in 1..=ndtji {
+        let dtji = ddijt[idtji];
+        let f_samp = rec30_field(&dtji, 0);
+        let f_spec = rec30_field(&dtji, 1);
+        let i = binfnd(&sa, m, &f_samp);
+        idat[i] += 1;
+        if f_spec != spec1 {
+            iitot[i] += 1;
+            spec1 = f_spec;
+        }
+    }
+
+    // Now calculate frequencies
+    let mut idtji = 0usize;
+    let mut iwgt = 0usize;
+    let mut ii_leftover = 0usize; // tracks Fortran loop variable ii afterwards
+    for ii in 1..=m {
+        ii_leftover = ii + 1;
+        if ii % 100 == 0 {
+            ld_line(&format!("frequencies {}{}", name_to_string(&sa[ii]), ld_i(ii as i64)));
+        }
+        for j in 1..=n {
+            jocc[j] = 0;
+            idata.set(ii, j, 0);
+        }
+        for _ in 1..=idat[ii] {
+            idtji += 1;
+            let dtji = ddijt[idtji];
+            let f_spec = rec30_field(&dtji, 1);
+            let j = binfnd(&sp, n, &f_spec);
+            jocc[j] = 1;
+            idata.set(ii, j, 1);
+        }
+        for _ in 1..=numwgt[ii] {
+            iwgt += 1;
+            let dtji = wneigh[iwgt];
+            let f_targ = rec30_field(&dtji, 1);
+            let f_wgt = rec30_field(&dtji, 2);
+            let i = binfnd(&sa, m, &f_targ);
+            let wgt = getnum(&f_wgt);
+            let denom = wgttot[i] + 1.0E-10;
+            for j in 1..=n {
+                let contrib = (jocc[j] as f32) * wgt / denom;
+                ffij.add(i, j, contrib);
+            }
+        }
+    }
+    // Local frequencies are now in ffij(i,j).
+
+    // Downweight species that are unsuitable as benchmarks
+    for ib in 1..=nbnchx {
+        let j = binfnd(&sp, n, &bnchx[ib]);
+        if j != 0 {
+            bwght[j] = 0.001;
+        }
+    }
+
+    for i in 1..=m {
+        // NB: the original mistakenly uses ii (leftover loop variable) here;
+        // we reproduce the condition but avoid the out-of-bounds name lookup.
+        if ii_leftover % 100 == 0 {
+            let name = sa.get(ii_leftover).map(name_to_string).unwrap_or_default();
+            ld_line(&format!("rescaling {}{}", name, ld_i(ii_leftover as i64)));
+        }
+        for j in 1..=n {
+            f[j] = ffij.at(i, j);
+            jocc[j] = idata.at(i, j);
+        }
+        let samp_i = sa[i];
+        let itot = iitot[i];
+        // wn2 is the Effective Number of weights in the neighbourhood
+        let wn2 = wgttot[i] * wgttot[i] / (wgtt2[i] + 1.0E-12);
+        let (phi1, spnum) = fresca(
+            i,
+            n,
+            itot,
+            &jocc,
+            &mut f,
+            &mut ff,
+            &mut jrank,
+            &samp_i,
+            &sp,
+            phibig,
+            FMAX,
+            FMIN,
+            wn2,
+            TOL,
+            IREPMX,
+            &mut unit7,
+            &mut unit8,
+        );
+        ffff[i] = phi1;
+        abtot[i] = 1.0E-7;
+        for j in 1..=n {
+            if ffij.at(i, j) != 0.0 {
+                ffij.set(i, j, ff[j]);
+            }
+            let jj = jrank[j] as usize;
+            let rank1 = (j as f32) / spnum;
+            // The case j=1 is included because with small samples rank1 may
+            // be greater than the limit for j=1
+            if rank1 < blim || j == 1 {
+                ibench.set(i, jj, 1);
+                abtot[i] += bwght[jj];
+            } else {
+                ibench.set(i, jj, 0);
+            }
+        }
+    }
+
+    // The next task is to reorder the main data matrix
+    for idtji in 1..=ndtji {
+        let dtji = ddijt[idtji];
+        let f_samp = rec30_field(&dtji, 0);
+        let f_spec = rec30_field(&dtji, 1);
+        let f_time = rec30_field(&dtji, 2);
+        if idtji % 20000 == 0 {
+            ld_line(&format!(
+                "Re-ordering {}{}{}{}",
+                name_to_string(&f_samp),
+                name_to_string(&f_spec),
+                name_to_string(&f_time),
+                ld_i(idtji as i64)
+            ));
+        }
+        ddijt[idtji] = make_rec30(&f_spec, &f_time, &f_samp);
+    }
+    cout(" Now doing second sort of reordered main data ...");
+    sort30(&mut ddijt, ndtji);
+    // From now onwards the sorted form is called ddjti.
+
+    for idtji in 1..=ndtji {
+        if idtji % 20000 == 0 {
+            ld_line(&format!(
+                "Main data to calc sampling effort{}{}",
+                String::from_utf8_lossy(&ddijt[idtji]),
+                ld_i(idtji as i64)
+            ));
+        }
+        let dtji = ddijt[idtji];
+        let f_spec = rec30_field(&dtji, 0);
+        let f_time = rec30_field(&dtji, 1);
+        let f_samp = rec30_field(&dtji, 2);
+        let i = binfnd(&sa, m, &f_samp);
+        let j = binfnd(&sp, n, &f_spec);
+        let iit = binfnd(&tim, nt, &f_time);
+        lendat.add(j, iit, 1);
+        let contrib = (ibench.at(i, j) as f32) * bwght[j] / abtot[i];
+        sampef.add(i, iit, contrib);
+    }
+
+    let mut idtji = 0usize;
+    let mut jx = 1usize;
+    let mut iitx = 1usize;
+    // These are markers to ensure that we print out time periods at which
+    // species were not recorded.
+
+    // 2060 header
+    writeln(
+        &mut unit9,
+        "Species__  Time______ TFactor St_Dev _Count ___spt ___est N>0.00 N>0.98",
+    );
+
+    // label 130 loop
+    'main: loop {
+        for i in 1..=m {
+            iocc[i] = 0;
+        }
+        idtji += 1;
+        if idtji > ndtji {
+            break 'main;
+        }
+        let dtji = ddijt[idtji];
+        let f_spec = rec30_field(&dtji, 0);
+        let f_time = rec30_field(&dtji, 1);
+        let mut f_samp = rec30_field(&dtji, 2);
+        let j = binfnd(&sp, n, &f_spec);
+        let iit = binfnd(&tim, nt, &f_time);
+        for i in 1..=m {
+            smpint[i] = sampef.at(i, iit);
+            fff[i] = ffij.at(i, j);
+        }
+        let i = binfnd(&sa, m, &f_samp);
+        iocc[i] = 1;
+        for _ in 1..lendat.at(j, iit) {
+            idtji += 1;
+            if idtji > ndtji {
+                break 'main;
+            }
+            let dtji = ddijt[idtji];
+            f_samp = rec30_field(&dtji, 2);
+            let i = binfnd(&sa, m, &f_samp);
+            iocc[i] = 1;
+        }
+        let (tf, sd, spt, jtot, est, ic1, ic2) = tfcalc(&iocc, &smpint, &fff, m);
+        // first pad out the output with times when the species was not recorded
+        if sp[jx] < sp[j] {
+            for iiit in iitx..=nt {
+                write_zero_trend(&mut unit9, &sp[jx], &tim[iiit]);
+            }
+            for jj in (jx + 1)..j {
+                for iiit in 1..=nt {
+                    write_zero_trend(&mut unit9, &sp[jj], &tim[iiit]);
+                }
+            }
+            jx = j;
+            iitx = 1;
+        }
+        if tim[iitx] < tim[iit] {
+            for iiit in iitx..iit {
+                write_zero_trend(&mut unit9, &sp[j], &tim[iiit]);
+            }
+            iitx = iit;
+        }
+        // 2050 format(a10,1x,a10,f8.3,f7.3,i7,2f7.1,2i7)
+        write_trend(&mut unit9, &sp[j], &tim[iit], tf, sd, jtot, spt, est, ic1, ic2);
+        if j % 10 == 0 {
+            let mut r = Rec::new();
+            r.name(&sp[j])
+                .x(1)
+                .name(&tim[iit])
+                .f(tf, 8, 3)
+                .f(sd, 7, 3)
+                .i(j as i64, 7);
+            cout(&String::from_utf8_lossy(&r.buf));
+        }
+        jx = j;
+        iitx = iit + 1;
+    }
+
+    // label 140
+    for iiit in iitx..=nt {
+        write_zero_trend(&mut unit9, &sp[jx], &tim[iiit]);
+    }
+
+    unit7.flush().unwrap();
+    unit8.flush().unwrap();
+    unit9.flush().unwrap();
+
+    // Finally test whether given value of phi appears to be unrealistically low
+    // (2513: leading // produces two blank records)
+    sort_real(&mut ffff, m);
+    let i985 = (0.985f32 * m as f32) as usize;
+    let phi985 = ffff[i985];
+    for _ in 0..2 {
+        writeln(&mut unit10, "");
+        cout("");
+    }
+    writeln(&mut unit10, &format!(" 98.5 percentile of input phi {}", ffmt(phi985, 5, 2)));
+    writeln(&mut unit10, &format!(" Target value of phi          {}", ffmt(phibig, 5, 2)));
+    cout(&format!(" 98.5 percentile of input phi {}", ffmt(phi985, 5, 2)));
+    cout(&format!(" Target value of phi          {}", ffmt(phibig, 5, 2)));
+    if phibig < phi985 {
+        // 2514: /// then text, /, text, /
+        for _ in 0..3 {
+            cout("");
+            writeln(&mut unit10, "");
+        }
+        cout(" *** BEWARE *** ");
+        writeln(&mut unit10, " *** BEWARE *** ");
+        cout("");
+        writeln(&mut unit10, "");
+        cout(" Target value of phi may be too small");
+        writeln(&mut unit10, " Target value of phi may be too small");
+        cout("");
+        writeln(&mut unit10, "");
+    }
+    // 2503: leading and trailing slashes
+    writeln(&mut unit10, "");
+    writeln(&mut unit10, " Calculation reached completion");
+    writeln(&mut unit10, "");
+    cout("");
+    cout(" Calculation reached completion");
+    cout("");
+    unit10.flush().unwrap();
+
+    hold(&mut stdin);
+}
+```

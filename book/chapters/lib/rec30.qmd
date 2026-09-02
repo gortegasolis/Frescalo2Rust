@@ -1,0 +1,40 @@
+---
+title: "`Rec30`: fixed-width name/site record"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. An occurrence record is really a
+triple — e.g. (site, species, time period), or (neighbour site, target
+site, weight) — and `frescalo`/`neighsim` sort huge numbers of these
+triples so that matching records end up adjacent (all records for one
+site together, sorted by species; all a target site's weighted neighbours
+together, etc.). `make_rec30` glues three 10-character fields into one
+30-character record so they sort and compare as a single unit;
+`rec30_field` pulls one of the three fields back out again.
+
+### `make_rec30`
+
+```{.rust filename="src/lib.rs" tangle="lib__make_rec30"}
+pub fn make_rec30(a: &Name, b: &Name, c: &Name) -> Rec30 {
+    let mut r = [BLANK; 30];
+    r[0..10].copy_from_slice(a);
+    r[10..20].copy_from_slice(b);
+    r[20..30].copy_from_slice(c);
+    r
+}
+```
+
+### `rec30_field`
+
+```{.rust filename="src/lib.rs" tangle="lib__rec30_field"}
+pub fn rec30_field(r: &Rec30, i: usize) -> Name {
+    let mut n = [BLANK; 10];
+    n.copy_from_slice(&r[i * 10..i * 10 + 10]);
+    n
+}
+```

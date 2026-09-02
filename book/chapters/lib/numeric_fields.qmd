@@ -1,0 +1,61 @@
+---
+title: "`read_f8_4` / `read_int_listdirected`: numeric field readers"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself, but these two read the two
+parameters that matter most to the method's results: `read_f8_4` reads
+the target local frequency Φ and the benchmark limit R* typed at the
+`frescalo` prompts (pressing return keeps the default, Φ=0.74, R*=0.2703 —
+see [`frescalo/main`](../frescalo/main.qmd) for what those mean).
+`read_int_listdirected` reads a plain whole number — used by `sampdist`
+and `neighsim` for "how many neighbours to include".
+
+### `read_f8_4`
+
+```{.rust filename="src/lib.rs" tangle="lib__read_f8_4"}
+pub fn read_f8_4(stdin: &mut impl BufRead) -> Option<f32> {
+    let line = read_stdin_line(stdin);
+    let bytes = line.as_bytes();
+    let n = bytes.len().min(8);
+    let field: Vec<u8> = bytes[..n].iter().filter(|&&c| c != BLANK).copied().collect();
+    if field.is_empty() {
+        return Some(0.0);
+    }
+    let s = String::from_utf8_lossy(&field).into_owned();
+    if s.contains('.') {
+        s.parse::<f32>().ok()
+    } else {
+        match s.parse::<i64>() {
+            Ok(v) => Some(v as f32 / 10000.0),
+            Err(_) => None,
+        }
+    }
+}
+```
+
+### `read_int_listdirected`
+
+```{.rust filename="src/lib.rs" tangle="lib__read_int_listdirected"}
+pub fn read_int_listdirected(stdin: &mut impl BufRead) -> i32 {
+    let line = read_stdin_line(stdin);
+    match line.split_whitespace().next() {
+        Some(tok) => match tok.parse::<i32>() {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("\nFortran runtime error: Bad integer for item 1 in list input");
+                std::process::exit(2);
+            }
+        },
+        None => {
+            eprintln!("\nFortran runtime error: End of file");
+            std::process::exit(2);
+        }
+    }
+}
+```

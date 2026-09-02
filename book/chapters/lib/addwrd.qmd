@@ -1,0 +1,47 @@
+---
+title: "`addwrd` / `addwrd_guarded`: word-list insertion"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. Builds up the master, sorted list
+of distinct site or species codes seen so far as records are read in one
+at a time — this is how the programs learn the full set of sites/species
+in a data set without being told it in advance. `addwrd_guarded` is the
+same thing but stops (silently) once a fixed array-size limit is reached,
+matching the original Fortran's static array bounds.
+
+### `addwrd`
+
+```{.rust filename="src/lib.rs" tangle="lib__addwrd"}
+pub fn addwrd(sa: &mut [Name], m: &mut usize, samp: &Name) {
+    let i = if *m == 0 { 0 } else { binfnd(sa, *m, samp) };
+    if i != 0 {
+        return;
+    }
+    *m += 1;
+    sa[*m] = *samp;
+    sa[1..=*m].sort_unstable();
+}
+```
+
+### `addwrd_guarded`
+
+```{.rust filename="src/lib.rs" tangle="lib__addwrd_guarded"}
+pub fn addwrd_guarded(sa: &mut [Name], mm: usize, m: &mut usize, samp: &Name) {
+    let i = if *m == 0 { 0 } else { binfnd(sa, *m, samp) };
+    if i != 0 {
+        return;
+    }
+    *m += 1;
+    if *m > mm {
+        return;
+    }
+    sa[*m] = *samp;
+    sa[1..=*m].sort_unstable();
+}
+```

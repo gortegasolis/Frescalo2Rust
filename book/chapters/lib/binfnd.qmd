@@ -1,0 +1,45 @@
+---
+title: "`binfnd`: binary search"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what this function does, and, where relevant, which Fortran subroutine/statement it ports. -->
+
+## What this does
+
+Plumbing, not part of the method itself. Looks up a site or species code
+in a sorted list and returns its position (or 0 if not found), using
+binary search so this stays fast even with millions of records — e.g. the
+2 038 000 bryophyte records across 3695 sites used in the paper's example
+(Hill 2011, p.196). Every time the code needs to relate a record to "which
+site is this" or "which species is this", it goes through `binfnd`.
+
+```{.rust filename="src/lib.rs" tangle="lib__binfnd"}
+pub fn binfnd(ma: &[Name], n: usize, na: &Name) -> usize {
+    let mut imin = 1usize;
+    let mut iamin = ma[imin];
+    let mut imax = n;
+    let mut iamax = ma[imax];
+    loop {
+        if imax - imin <= 1 {
+            if iamin == *na {
+                return imin;
+            }
+            if iamax == *na {
+                return imax;
+            }
+            return 0;
+        }
+        let imid = (imax + imin) / 2;
+        let iamid = ma[imid];
+        if *na <= iamid {
+            imax = imid;
+            iamax = iamid;
+        } else {
+            imin = imid;
+            iamin = iamid;
+        }
+    }
+}
+```

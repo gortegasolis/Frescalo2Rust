@@ -1,0 +1,32 @@
+---
+title: "Name helpers: `blank_name` and `name_to_string`"
+---
+
+Part of `src/lib.rs` (`lib` binary/module).
+
+<!-- TODO: describe what these functions do, and, where relevant, which Fortran subroutine/statement they port. -->
+
+## What this does
+
+Plumbing, not part of the method itself. Site codes, species codes and
+time-period labels are all handled as fixed-width, 10-character,
+blank-padded text fields throughout the pipeline (matching the Fortran
+`character*10` fields of the original file formats). `blank_name` creates
+an empty one of these fields; `name_to_string` converts one back to an
+ordinary trimmed string for printing to the screen or a log file.
+
+### `blank_name`
+
+```{.rust filename="src/lib.rs" tangle="lib__blank_name"}
+pub fn blank_name() -> Name {
+    [BLANK; 10]
+}
+```
+
+### `name_to_string`
+
+```{.rust filename="src/lib.rs" tangle="lib__name_to_string"}
+pub fn name_to_string(n: &Name) -> String {
+    String::from_utf8_lossy(n).trim_end().to_string()
+}
+```

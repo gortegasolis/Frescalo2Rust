@@ -1,0 +1,39 @@
+# Welcome {.unnumbered}
+
+This book documents the Rust port of Mark Hill's original FRESCALO Fortran
+suite (`sampdist_1.f`, `neighsim_1.f`, `Frescalo_1.f`), one chapter per Rust
+function.
+
+Each chapter's code cell is the **authoritative source** for that function:
+editing the code block in a chapter and re-rendering the book (or running
+`python3 tools/tangle.py` directly) writes the updated code into the correct
+location in the corresponding file under `../src/`, replacing only the
+region between its `// @tangle:start <id>` / `// @tangle:end <id>` markers.
+Everything else in the `.rs` files — imports, struct/impl scaffolding,
+surrounding functions — is left untouched.
+
+The book is organized by source file, in the order the pipeline runs:
+`src/lib.rs` (shared support code used by all three binaries), then
+`sampdist`, `neighsim`, and `frescalo`.
+
+See `../README.md` for the fidelity audit against the original Fortran and
+the list of intentionally preserved quirks/bugs.
+
+## The method, and how to read the "What this does" boxes
+
+Alongside the code, most chapters carry a short **"What this does"** section
+aimed at ecologists rather than programmers: what the function means for
+your occurrence data, not how it's implemented. Where a function
+corresponds to a specific step of the FRESCALO method, that section links
+it back to the relevant part of the paper the method comes from:
+
+> Hill, M.O. (2012) Local frequency as a key to interpreting species
+> occurrence data when recording effort is not known. *Methods in Ecology
+> and Evolution*, 3, 195–205.
+> [doi:10.1111/j.2041-210X.2011.00146.x](https://doi.org/10.1111/j.2041-210X.2011.00146.x)
+
+A copy is also kept at `../Original_frescalo/`. Many functions in
+`src/lib.rs`, however, are plumbing (fixed-width text parsing, sorting,
+console output, Fortran-style number formatting) that the paper never
+discusses directly — those chapters say so plainly rather than forcing a
+connection that isn't there.
