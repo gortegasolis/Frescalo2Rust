@@ -1,0 +1,25 @@
+[package]
+name = "frescalo"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of Mark Hill's FRESCALO, SAMPDIST and NEIGHSIM Fortran programs (2011)"
+
+[lib]
+name = "frescalo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sampdist"
+path = "src/bin/sampdist.rs"
+
+[[bin]]
+name = "neighsim"
+path = "src/bin/neighsim.rs"
+
+[[bin]]
+name = "frescalo"
+path = "src/bin/frescalo.rs"
+
+[profile.release]
+# Keep strict IEEE semantics (no fast-math) so results match the Fortran originals.
+opt-level = 3

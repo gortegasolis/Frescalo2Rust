@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux-x86_64
+            archive_ext: tar.gz
+          - os: windows-latest
+            artifact: windows-x86_64
+            archive_ext: zip
+          - os: macos-latest
+            artifact: macos-arm64
+            archive_ext: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binaries
+        run: cargo build --release
+
+      - name: Package archive
+        shell: bash
+        run: |
+          mkdir -p dist
+          name="frescalo-${GITHUB_REF_NAME}-${{ matrix.artifact }}"
+          staging="dist/$name"
+          mkdir -p "$staging"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/release/sampdist.exe target/release/neighsim.exe target/release/frescalo.exe "$staging/"
+          else
+            cp target/release/sampdist target/release/neighsim target/release/frescalo "$staging/"
+          fi
+          cp README.md "$staging/"
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            (cd dist && 7z a "$name.zip" "$name")
+          else
+            (cd dist && tar czf "$name.tar.gz" "$name")
+          fi
+          echo "ASSET=dist/$name.${{ matrix.archive_ext }}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frescalo-${{ matrix.artifact }}-archive
+          path: ${{ env.ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

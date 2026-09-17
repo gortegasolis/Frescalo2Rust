@@ -1,0 +1,12 @@
+/target
+/verify_work
+/test_run
+/fortran_build
+
+# Others
+/AI_plans
+/.serena
+
+# Original Fortran sources/binaries/data kept locally for reference and for
+# verify_against_fortran.sh, but not tracked in git.
+/Original_frescalo
